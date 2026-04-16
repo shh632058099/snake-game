@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>贪吃蛇闯关</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Chakra+Petch:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="game-shell">
+    <section class="hero">
+      <p class="eyebrow">Arcade Web Game</p>
+      <h1>贪吃蛇闯关</h1>
+      <p class="subtitle">吃到目标分数进入下一关。越往后速度越快，障碍越多。</p>
+    </section>
+
+    <section class="hud">
+      <article class="stat-card">
+        <span>分数</span>
+        <strong id="score">0</strong>
+      </article>
+      <article class="stat-card">
+        <span>最高分</span>
+        <strong id="best-score">0</strong>
+      </article>
+      <article class="stat-card">
+        <span>关卡</span>
+        <strong id="level">1 / 6</strong>
+      </article>
+      <article class="stat-card">
+        <span>本关目标</span>
+        <strong id="goal">0 / 5</strong>
+      </article>
+    </section>
+
+    <section class="play-area">
+      <div class="canvas-wrap">
+        <canvas id="game" width="600" height="600" aria-label="贪吃蛇游戏画布"></canvas>
+        <div class="overlay" id="overlay">
+          <p id="overlay-tag">准备开始</p>
+          <h2 id="overlay-title">按开始按钮进入第 1 关</h2>
+          <p id="overlay-text">键盘方向键 / WASD 控制，也支持下方触屏按钮。</p>
+        </div>
+      </div>
+
+      <aside class="side-panel">
+        <div class="controls">
+          <button id="start-btn" class="primary-btn">开始游戏</button>
+          <button id="pause-btn">暂停</button>
+          <button id="restart-btn">重新开始</button>
+        </div>
+
+        <div class="tips">
+          <h3>规则</h3>
+          <p>每吃到一个果实 +10 分。</p>
+          <p>每关有独立目标，完成后自动进入下一关。</p>
+          <p>撞墙、撞自己、撞障碍都会失败。</p>
+        </div>
+
+        <div class="tips">
+          <h3>操作</h3>
+          <p>电脑：方向键 / WASD</p>
+          <p>手机：点击下方方向按钮</p>
+        </div>
+      </aside>
+    </section>
+
+    <section class="mobile-controls" aria-label="移动端方向键">
+      <button data-dir="up">↑</button>
+      <div class="middle-row">
+        <button data-dir="left">←</button>
+        <button data-dir="down">↓</button>
+        <button data-dir="right">→</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
