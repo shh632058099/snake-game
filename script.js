@@ -25,8 +25,17 @@ const state = {
   snake: [],
   direction: { x: 1, y: 0 },
   queuedDirection: { x: 1, y: 0 },
-  food: { x: 10, y: 10 },
+  food: { x: 10, y: 10, type: "normal" },
   obstacles: [],
+  effects: {
+    invincible: 0,
+    scoreMultiplier: 1
+  },
+  combo: { type: null, count: 0 },
+  pathHistory: [],
+  ghostSnake: null,
+  earthEffectTimer: 0,
+  tickCount: 0,
   score: 0,
   bestScore: Number(localStorage.getItem(bestScoreKey) || 0),
   level: 1,
@@ -65,7 +74,15 @@ function updateHud() {
   scoreEl.textContent = state.score;
   bestScoreEl.textContent = state.bestScore;
   levelEl.textContent = `${state.level} / ${totalLevels}`;
-  goalEl.textContent = `${state.foodsThisLevel} / ${getLevelGoal(state.level)}`;
+  
+  // 增加连击显示
+  let goalText = `${state.foodsThisLevel} / ${getLevelGoal(state.level)}`;
+  if (state.combo.count > 0) {
+    const comboEmoji = { fire: "🔥", wind: "⚡", earth: "💎" };
+    goalText += ` | ${comboEmoji[state.combo.type] || ""} x${state.combo.count}`;
+  }
+  goalEl.textContent = goalText;
+  
   pauseBtn.textContent = state.paused ? "继续" : "暂停";
 }
 
@@ -85,6 +102,8 @@ function createSnake() {
   ];
   state.direction = { x: 1, y: 0 };
   state.queuedDirection = { x: 1, y: 0 };
+  state.pathHistory = [];
+  state.ghostSnake = null;
 }
 
 function sameCell(a, b) {
@@ -111,7 +130,15 @@ function randomFreeCell() {
 }
 
 function placeFood() {
-  state.food = randomFreeCell();
+  const cell = randomFreeCell();
+  const rand = Math.random();
+  let type = "normal";
+  
+  if (rand > 0.85) type = "fire";
+  else if (rand > 0.70) type = "wind";
+  else if (rand > 0.55) type = "earth";
+
+  state.food = { ...cell, type };
 }
 
 function placeObstacles() {
@@ -131,6 +158,11 @@ function placeObstacles() {
 function setupLevel(level) {
   state.level = level;
   state.foodsThisLevel = 0;
+  state.combo = { type: null, count: 0 };
+  state.effects.invincible = 0;
+  state.effects.scoreMultiplier = 1;
+  state.earthEffectTimer = 0;
+  state.tickCount = 0;
   createSnake();
   placeObstacles();
   placeFood();
@@ -146,7 +178,7 @@ function resetGame() {
   state.gameOver = false;
   state.finished = false;
   setupLevel(1);
-  showOverlay("准备开始", "按开始按钮进入第 1 关", "每关目标会增加，速度和障碍也会同步提升。");
+  showOverlay("准备开始", "按开始按钮进入第 1 关", "连续吃 3 个同色果实触发进化：火(碎石)、风(无敌)、土(双倍)");
 }
 
 function startGame() {
@@ -221,13 +253,46 @@ function updateDirection(next) {
   }
 }
 
+function applyEvolution(type) {
+  if (type === "fire") {
+    if (state.obstacles.length > 0) {
+      state.obstacles.pop();
+    }
+  } else if (type === "wind") {
+    state.effects.invincible = 15;
+  } else if (type === "earth") {
+    state.effects.scoreMultiplier = 2;
+    // 土元素效果持续 20 个 tick
+    state.earthEffectTimer = 20;
+  }
+}
+
 function eatFood(head) {
   if (!sameCell(head, state.food)) {
     state.snake.pop();
     return false;
   }
 
-  state.score += 10;
+  const foodType = state.food.type;
+  if (foodType !== "normal") {
+    if (state.combo.type === foodType) {
+      state.combo.count++;
+    } else {
+      state.combo.type = foodType;
+      state.combo.count = 1;
+    }
+
+    if (state.combo.count >= 3) {
+      applyEvolution(foodType);
+      state.combo.count = 0;
+      state.combo.type = null;
+    }
+  } else {
+    state.combo.count = 0;
+    state.combo.type = null;
+  }
+
+  state.score += 10 * state.effects.scoreMultiplier;
   state.foodsThisLevel += 1;
   setBestScore();
 
@@ -244,6 +309,27 @@ function eatFood(head) {
 function tick() {
   if (!state.running || state.paused || state.gameOver || state.finished) {
     return;
+  }
+
+  if (state.effects.invincible > 0) {
+    state.effects.invincible--;
+  }
+  if (state.earthEffectTimer > 0) {
+    state.earthEffectTimer--;
+    if (state.earthEffectTimer === 0) {
+      state.effects.scoreMultiplier = 1;
+    }
+  }
+
+  state.tickCount++;
+
+  if (state.level >= 4 && state.tickCount % 35 === 0) {
+    collapseMap();
+  }
+
+  if (state.tickCount % 20 === 0 && state.pathHistory.length > 20) {
+    const ghostLength = Math.min(state.snake.length, 10);
+    state.ghostSnake = state.pathHistory.slice(-20, -20 + ghostLength).map((part) => ({ ...part }));
   }
 
   state.direction = { ...state.queuedDirection };
@@ -263,21 +349,60 @@ function tick() {
     return;
   }
 
-  const hitSelf = state.snake.some((part) => sameCell(part, head));
-  const hitObstacle = state.obstacles.some((block) => sameCell(block, head));
-  if (hitSelf || hitObstacle) {
-    loseGame(hitSelf ? "你撞到了自己。" : "你撞到了障碍物。");
-    draw();
-    return;
+  const isInvincible = state.effects.invincible > 0;
+  if (!isInvincible) {
+    const hitSelf = state.snake.some((part) => sameCell(part, head));
+    const hitObstacle = state.obstacles.some((block) => sameCell(block, head));
+    const hitGhost = Boolean(state.ghostSnake && state.ghostSnake.some((part) => sameCell(part, head)));
+
+    if (hitSelf || hitObstacle || hitGhost) {
+      let msg = "你撞到了自己。";
+      if (hitObstacle) msg = "你撞到了障碍物。";
+      if (hitGhost) msg = "你撞到了时空残影！";
+      loseGame(msg);
+      draw();
+      return;
+    }
   }
 
   state.snake.unshift(head);
+
+  state.pathHistory.push({ ...head });
+  if (state.pathHistory.length > 50) {
+    state.pathHistory.shift();
+  }
+
   const leveledUp = eatFood(head);
   updateHud();
   draw();
 
   if (!leveledUp && state.running && !state.paused && !state.gameOver && !state.finished) {
     scheduleNextTick();
+  }
+}
+
+function collapseMap() {
+  const side = Math.floor(Math.random() * 4);
+  let cell;
+
+  if (side === 0) {
+    cell = { x: 0, y: Math.floor(Math.random() * tileCount) };
+  } else if (side === 1) {
+    cell = { x: tileCount - 1, y: Math.floor(Math.random() * tileCount) };
+  } else if (side === 2) {
+    cell = { x: Math.floor(Math.random() * tileCount), y: 0 };
+  } else {
+    cell = { x: Math.floor(Math.random() * tileCount), y: tileCount - 1 };
+  }
+
+  const duplicated = state.obstacles.some((block) => sameCell(block, cell));
+  const isOccupied =
+    duplicated ||
+    state.snake.some((part) => sameCell(part, cell)) ||
+    sameCell(state.food, cell);
+
+  if (!isOccupied) {
+    state.obstacles.push(cell);
   }
 }
 
@@ -309,13 +434,32 @@ function drawBoard() {
 function drawFood() {
   const x = state.food.x * gridSize;
   const y = state.food.y * gridSize;
-  ctx.fillStyle = "#ff4f5e";
+  const palette = {
+    normal: { body: "#ff4f5e", accent: "#7bd389" },
+    fire: { body: "#ff7a1a", accent: "#ffd166" },
+    wind: { body: "#5ac8fa", accent: "#d7f5ff" },
+    earth: { body: "#c78b46", accent: "#f2d398" }
+  };
+  const colors = palette[state.food.type] || palette.normal;
+
+  ctx.fillStyle = colors.body;
   ctx.beginPath();
   ctx.arc(x + gridSize / 2, y + gridSize / 2, gridSize * 0.32, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#7bd389";
-  ctx.fillRect(x + gridSize * 0.48, y + gridSize * 0.12, gridSize * 0.08, gridSize * 0.18);
+  if (state.food.type === "wind") {
+    ctx.strokeStyle = colors.accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + gridSize / 2, y + gridSize / 2, gridSize * 0.18, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (state.food.type === "earth") {
+    ctx.fillStyle = colors.accent;
+    ctx.fillRect(x + gridSize * 0.38, y + gridSize * 0.38, gridSize * 0.24, gridSize * 0.24);
+  } else {
+    ctx.fillStyle = colors.accent;
+    ctx.fillRect(x + gridSize * 0.48, y + gridSize * 0.12, gridSize * 0.08, gridSize * 0.18);
+  }
 }
 
 function drawObstacles() {
@@ -327,11 +471,29 @@ function drawObstacles() {
   });
 }
 
+function drawGhostSnake() {
+  if (!state.ghostSnake) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  state.ghostSnake.forEach((part) => {
+    const x = part.x * gridSize;
+    const y = part.y * gridSize;
+    ctx.fillStyle = "#4cc9f0";
+    ctx.fillRect(x + 4, y + 4, gridSize - 8, gridSize - 8);
+  });
+  ctx.restore();
+}
+
 function drawSnake() {
   state.snake.forEach((part, index) => {
     const x = part.x * gridSize;
     const y = part.y * gridSize;
-    ctx.fillStyle = index === 0 ? "#00a878" : "#7bd389";
+    const headColor = state.effects.invincible > 0 ? "#8be9fd" : "#00a878";
+    const bodyColor = state.effects.invincible > 0 ? "#56cfe1" : "#7bd389";
+    ctx.fillStyle = index === 0 ? headColor : bodyColor;
     ctx.fillRect(x + 2, y + 2, gridSize - 4, gridSize - 4);
 
     if (index === 0) {
@@ -354,6 +516,7 @@ function drawLevelBadge() {
 function draw() {
   drawBoard();
   drawObstacles();
+  drawGhostSnake(); // 绘制残影
   drawFood();
   drawSnake();
   drawLevelBadge();
