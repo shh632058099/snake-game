@@ -61,7 +61,8 @@ function getLevelSpeed(level) {
 }
 
 function getObstacleCount(level) {
-  return Math.min(7, Math.max(0, level - 1));
+  // 无尽模式下，障碍物数量上限提高
+  return Math.min(20, Math.max(0, level - 1));
 }
 
 function showOverlay(tag, title, text) {
@@ -78,7 +79,7 @@ function hideOverlay() {
 function updateHud() {
   scoreEl.textContent = state.score;
   bestScoreEl.textContent = state.bestScore;
-  levelEl.textContent = `${state.level} / ${totalLevels}`;
+  levelEl.textContent = `LEVEL: ${state.level}`;
   
   // 增加连击显示
   let goalText = `${state.foodsThisLevel} / ${getLevelGoal(state.level)}`;
@@ -234,24 +235,25 @@ function loseGame(message) {
   showOverlay("闯关失败", "本局结束", `${message} 点击开始游戏可重新挑战。`);
 }
 
-function finishGame() {
-  state.running = false;
-  state.finished = true;
-  clearTimeout(state.loopId);
-  setBestScore();
-  updateHud();
-  showOverlay("全部通关", "你完成了 6 个关卡", `最终得分 ${state.score} 分，可以点击重新开始再来一局。`);
-}
+
 
 function advanceLevel() {
-  if (state.level >= totalLevels) {
-    finishGame();
-    return;
+  clearTimeout(state.loopId);
+  state.level++; // Advance level before setup
+  setupLevel(state.level);
+
+  let title = `进入第 ${state.level} 关`;
+  let text = `本关新增 ${getObstacleCount(state.level)} 个障碍，速度也会更快。`;
+
+  if (state.level > totalLevels) { // After completing initial 6 levels
+    title = "无尽挑战开始！";
+    text = "你已完成所有固定关卡，难度将持续提升，挑战你的极限！";
+  } else if (state.level === totalLevels) { // Just completed the last fixed level
+    title = "固定关卡全部完成！";
+    text = "欢迎来到无尽的挑战，难度将持续提升！";
   }
 
-  clearTimeout(state.loopId);
-  setupLevel(state.level + 1);
-  showOverlay("关卡完成", `进入第 ${state.level} 关`, `本关新增 ${getObstacleCount(state.level)} 个障碍，速度也会更快。`);
+  showOverlay("关卡完成", title, text);
   state.paused = true;
   state.running = true;
   updateHud();
@@ -379,8 +381,13 @@ function tick() {
 
   state.tickCount++;
 
-  if (state.level >= 4 && state.tickCount % 35 === 0) {
-    collapseMap();
+  if (state.level >= 4) {
+    const baseCollapseInterval = 35; // 基础坍缩间隔
+    // 关卡越高，坍缩越频繁，最小间隔 15 tick
+    const collapseInterval = Math.max(15, baseCollapseInterval - (state.level - 4) * 2);
+    if (state.tickCount % collapseInterval === 0) {
+      collapseMap();
+    }
   }
 
   if (state.tickCount % 20 === 0 && state.pathHistory.length > 20) {
