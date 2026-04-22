@@ -23,21 +23,24 @@ npx serve .
 
 Central `state` object manages all game data:
 - `snake[]` — Array of `{x, y}` segments
-- `direction` / `queuedDirection` — Current and queued direction for input buffering
+- `direction` / `inputQueue[]` — Current direction and command queue for input buffering
 - `obstacles[]` — Level-based obstacle blocks
-- `food` — Current food position
+- `food` — Current food position with `type` (normal, fire, wind, earth, water)
 - `score`, `level`, `foodsThisLevel` — Progression tracking
+- `effects` — Active power-ups (invincible, scoreMultiplier, timers)
+- `particles[]` / `shakeAmount` — Visual feedback systems
 - `running`, `paused`, `gameOver`, `finished` — Game phase flags
 
 ### Level System
 
 - 6 levels total; each level goal = `4 + level` foods
 - Speed: starts at 170ms tick, decreases by 16ms per level (minimum 72ms)
-- Obstacles: `Math.min(7, Math.max(0, level - 1))` per level, placed outside safe zone (center 6x6)
+- Power-ups: Eating 3 identical elemental foods in a row triggers evolution effects (Explosion, Invincibility, 2x Score, Bullet Time)
+- Obstacles: `Math.min(7, Math.max(0, level - 1))` per level, plus dynamic hazards in later levels
 
 ### Rendering
 
-Canvas-based at 600x600 with 20px grid (30x30 tiles). Uses `setTimeout`-based tick loop (not `requestAnimationFrame`) for consistent game speed.
+Canvas-based at 600x600 with 20px grid (30x30 tiles). Uses `setTimeout`-based tick loop for game logic, and `requestAnimationFrame` for smooth visual effects (particles, screen shake).
 
 ### Controls
 

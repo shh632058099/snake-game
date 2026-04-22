@@ -24,7 +24,7 @@ const bestScoreKey = "snake-level-best-score";
 const state = {
   snake: [],
   direction: { x: 1, y: 0 },
-  queuedDirection: { x: 1, y: 0 },
+  inputQueue: [],
   food: { x: 10, y: 10, type: "normal" },
   obstacles: [],
   effects: {
@@ -35,7 +35,11 @@ const state = {
   pathHistory: [],
   ghostSnake: null,
   earthEffectTimer: 0,
+  waterEffectTimer: 0,
   tickCount: 0,
+  particles: [],
+  warningCells: [],
+  shakeAmount: 0,
   score: 0,
   bestScore: Number(localStorage.getItem(bestScoreKey) || 0),
   level: 1,
@@ -52,7 +56,8 @@ function getLevelGoal(level) {
 }
 
 function getLevelSpeed(level) {
-  return Math.max(minSpeed, baseSpeed - (level - 1) * 16);
+  const speed = Math.max(minSpeed, baseSpeed - (level - 1) * 16);
+  return state.waterEffectTimer > 0 ? speed * 2 : speed;
 }
 
 function getObstacleCount(level) {
@@ -78,7 +83,7 @@ function updateHud() {
   // 增加连击显示
   let goalText = `${state.foodsThisLevel} / ${getLevelGoal(state.level)}`;
   if (state.combo.count > 0) {
-    const comboEmoji = { fire: "🔥", wind: "⚡", earth: "💎" };
+    const comboEmoji = { fire: "🔥", wind: "⚡", earth: "💎", water: "💧" };
     goalText += ` | ${comboEmoji[state.combo.type] || ""} x${state.combo.count}`;
   }
   goalEl.textContent = goalText;
@@ -101,7 +106,7 @@ function createSnake() {
     { x: mid - 2, y: mid }
   ];
   state.direction = { x: 1, y: 0 };
-  state.queuedDirection = { x: 1, y: 0 };
+  state.inputQueue = [];
   state.pathHistory = [];
   state.ghostSnake = null;
 }
@@ -134,9 +139,10 @@ function placeFood() {
   const rand = Math.random();
   let type = "normal";
   
-  if (rand > 0.85) type = "fire";
-  else if (rand > 0.70) type = "wind";
-  else if (rand > 0.55) type = "earth";
+  if (rand > 0.88) type = "fire";
+  else if (rand > 0.76) type = "wind";
+  else if (rand > 0.64) type = "earth";
+  else if (rand > 0.52) type = "water";
 
   state.food = { ...cell, type };
 }
@@ -162,7 +168,11 @@ function setupLevel(level) {
   state.effects.invincible = 0;
   state.effects.scoreMultiplier = 1;
   state.earthEffectTimer = 0;
+  state.waterEffectTimer = 0;
   state.tickCount = 0;
+  state.particles = [];
+  state.warningCells = [];
+  state.shakeAmount = 0;
   createSnake();
   placeObstacles();
   placeFood();
@@ -178,7 +188,7 @@ function resetGame() {
   state.gameOver = false;
   state.finished = false;
   setupLevel(1);
-  showOverlay("准备开始", "按开始按钮进入第 1 关", "连续吃 3 个同色果实触发进化：火(碎石)、风(无敌)、土(双倍)");
+  showOverlay("准备开始", "按开始按钮进入第 1 关", "连续吃 3 个同色果实触发进化：火(AOE爆炸)、风(无敌)、土(双倍)、水(慢速)");
 }
 
 function startGame() {
@@ -217,6 +227,7 @@ function togglePause() {
 function loseGame(message) {
   state.running = false;
   state.gameOver = true;
+  triggerShake(15);
   clearTimeout(state.loopId);
   setBestScore();
   updateHud();
@@ -247,23 +258,43 @@ function advanceLevel() {
 }
 
 function updateDirection(next) {
-  const invalidTurn = next.x === -state.direction.x && next.y === -state.direction.y;
+  if (state.inputQueue.length >= 2) return;
+
+  const lastDir = state.inputQueue.length > 0 
+    ? state.inputQueue[state.inputQueue.length - 1] 
+    : state.direction;
+
+  const invalidTurn = next.x === -lastDir.x && next.y === -lastDir.y;
   if (!invalidTurn) {
-    state.queuedDirection = next;
+    state.inputQueue.push(next);
   }
 }
 
 function applyEvolution(type) {
+  const head = state.snake[0];
   if (type === "fire") {
-    if (state.obstacles.length > 0) {
-      state.obstacles.pop();
-    }
+    // AOE 爆炸：移除 3x3 范围内的障碍物
+    const beforeCount = state.obstacles.length;
+    state.obstacles = state.obstacles.filter(block => {
+      const dx = Math.abs(block.x - head.x);
+      const dy = Math.abs(block.y - head.y);
+      if (dx <= 1 && dy <= 1) {
+        createParticles(block.x * gridSize, block.y * gridSize, "#ff6b35", 10);
+        return false;
+      }
+      return true;
+    });
+    
+    const destroyed = beforeCount - state.obstacles.length;
+    triggerShake(destroyed > 0 ? 20 : 10);
+    createParticles(head.x * gridSize, head.y * gridSize, "#ff7a1a", 25);
   } else if (type === "wind") {
     state.effects.invincible = 15;
   } else if (type === "earth") {
     state.effects.scoreMultiplier = 2;
-    // 土元素效果持续 20 个 tick
     state.earthEffectTimer = 20;
+  } else if (type === "water") {
+    state.waterEffectTimer = 30;
   }
 }
 
@@ -274,6 +305,15 @@ function eatFood(head) {
   }
 
   const foodType = state.food.type;
+  const palette = {
+    normal: "#ff4f5e",
+    fire: "#ff7a1a",
+    wind: "#5ac8fa",
+    earth: "#c78b46",
+    water: "#4cc9f0"
+  };
+  createParticles(state.food.x * gridSize, state.food.y * gridSize, palette[foodType] || palette.normal, 12);
+  
   if (foodType !== "normal") {
     if (state.combo.type === foodType) {
       state.combo.count++;
@@ -320,6 +360,22 @@ function tick() {
       state.effects.scoreMultiplier = 1;
     }
   }
+  if (state.waterEffectTimer > 0) {
+    state.waterEffectTimer--;
+  }
+
+  // 处理地图坍缩预警
+  for (let i = state.warningCells.length - 1; i >= 0; i--) {
+    const w = state.warningCells[i];
+    w.timer--;
+    if (w.timer <= 0) {
+      const isOccupied = state.snake.some((part) => sameCell(part, w)) || sameCell(state.food, w);
+      if (!isOccupied) {
+        state.obstacles.push({ x: w.x, y: w.y });
+      }
+      state.warningCells.splice(i, 1);
+    }
+  }
 
   state.tickCount++;
 
@@ -328,11 +384,17 @@ function tick() {
   }
 
   if (state.tickCount % 20 === 0 && state.pathHistory.length > 20) {
-    const ghostLength = Math.min(state.snake.length, 10);
-    state.ghostSnake = state.pathHistory.slice(-20, -20 + ghostLength).map((part) => ({ ...part }));
+    const ghostLength = state.level === 6 ? state.snake.length : Math.min(state.snake.length, 10);
+    // 幽灵蛇选取 20 个 tick 之前的路径片段
+    const start = Math.max(0, state.pathHistory.length - 20 - ghostLength);
+    const end = state.pathHistory.length - 20;
+    state.ghostSnake = state.pathHistory.slice(start, end).map((part) => ({ ...part }));
   }
 
-  state.direction = { ...state.queuedDirection };
+  if (state.inputQueue.length > 0) {
+    state.direction = state.inputQueue.shift();
+  }
+  
   const head = {
     x: state.snake[0].x + state.direction.x,
     y: state.snake[0].y + state.direction.y
@@ -368,7 +430,7 @@ function tick() {
   state.snake.unshift(head);
 
   state.pathHistory.push({ ...head });
-  if (state.pathHistory.length > 50) {
+  if (state.pathHistory.length > 150) {
     state.pathHistory.shift();
   }
 
@@ -395,20 +457,91 @@ function collapseMap() {
     cell = { x: Math.floor(Math.random() * tileCount), y: tileCount - 1 };
   }
 
-  const duplicated = state.obstacles.some((block) => sameCell(block, cell));
+  const isWarning = state.warningCells.some((w) => sameCell(w, cell));
+  const isObstacle = state.obstacles.some((block) => sameCell(block, cell));
   const isOccupied =
-    duplicated ||
+    isWarning ||
+    isObstacle ||
     state.snake.some((part) => sameCell(part, cell)) ||
     sameCell(state.food, cell);
 
   if (!isOccupied) {
-    state.obstacles.push(cell);
+    state.warningCells.push({ ...cell, timer: 15 });
   }
 }
 
 function scheduleNextTick() {
   clearTimeout(state.loopId);
   state.loopId = setTimeout(tick, getLevelSpeed(state.level));
+}
+
+function triggerShake(amount) {
+  state.shakeAmount = amount;
+}
+
+function createParticles(x, y, color, count = 8) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 3 + 1;
+    state.particles.push({
+      x: x + gridSize / 2,
+      y: y + gridSize / 2,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0,
+      decay: Math.random() * 0.05 + 0.02,
+      color: color
+    });
+  }
+}
+
+function updateAndDrawParticles() {
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+
+    if (p.life <= 0) {
+      state.particles.splice(i, 1);
+      continue;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawEffectsTimer() {
+  if (state.effects.invincible <= 0 && state.earthEffectTimer <= 0 && state.waterEffectTimer <= 0) return;
+
+  const head = state.snake[0];
+  const centerX = head.x * gridSize + gridSize / 2;
+  const centerY = head.y * gridSize + gridSize / 2;
+  const radius = gridSize * 0.8;
+
+  const drawArc = (ratio, color) => {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+    ctx.stroke();
+  };
+
+  if (state.effects.invincible > 0) {
+    drawArc(state.effects.invincible / 15, "#5ac8fa");
+  }
+  if (state.earthEffectTimer > 0) {
+    drawArc(state.earthEffectTimer / 20, "#ffd166");
+  }
+  if (state.waterEffectTimer > 0) {
+    drawArc(state.waterEffectTimer / 30, "#4cc9f0");
+  }
 }
 
 function drawBoard() {
@@ -438,7 +571,8 @@ function drawFood() {
     normal: { body: "#ff4f5e", accent: "#7bd389" },
     fire: { body: "#ff7a1a", accent: "#ffd166" },
     wind: { body: "#5ac8fa", accent: "#d7f5ff" },
-    earth: { body: "#c78b46", accent: "#f2d398" }
+    earth: { body: "#c78b46", accent: "#f2d398" },
+    water: { body: "#4cc9f0", accent: "#ffffff" }
   };
   const colors = palette[state.food.type] || palette.normal;
 
@@ -456,6 +590,11 @@ function drawFood() {
   } else if (state.food.type === "earth") {
     ctx.fillStyle = colors.accent;
     ctx.fillRect(x + gridSize * 0.38, y + gridSize * 0.38, gridSize * 0.24, gridSize * 0.24);
+  } else if (state.food.type === "water") {
+    ctx.fillStyle = colors.accent;
+    ctx.beginPath();
+    ctx.arc(x + gridSize * 0.45, y + gridSize * 0.45, gridSize * 0.08, 0, Math.PI * 2);
+    ctx.fill();
   } else {
     ctx.fillStyle = colors.accent;
     ctx.fillRect(x + gridSize * 0.48, y + gridSize * 0.12, gridSize * 0.08, gridSize * 0.18);
@@ -468,6 +607,21 @@ function drawObstacles() {
     const y = block.y * gridSize;
     ctx.fillStyle = "#ff6b35";
     ctx.fillRect(x + 3, y + 3, gridSize - 6, gridSize - 6);
+  });
+}
+
+function drawWarnings() {
+  state.warningCells.forEach((w) => {
+    const x = w.x * gridSize;
+    const y = w.y * gridSize;
+    // 闪烁效果：基于时间或 timer
+    const alpha = 0.3 + Math.sin(Date.now() / 100) * 0.2;
+    ctx.fillStyle = `rgba(255, 79, 94, ${alpha})`;
+    ctx.fillRect(x + 1, y + 1, gridSize - 2, gridSize - 2);
+    
+    ctx.strokeStyle = "#ff4f5e";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 2, y + 2, gridSize - 4, gridSize - 4);
   });
 }
 
@@ -514,12 +668,31 @@ function drawLevelBadge() {
 }
 
 function draw() {
+  ctx.save();
+  if (state.shakeAmount > 0) {
+    const dx = (Math.random() - 0.5) * state.shakeAmount;
+    const dy = (Math.random() - 0.5) * state.shakeAmount;
+    ctx.translate(dx, dy);
+    state.shakeAmount *= 0.8;
+    if (state.shakeAmount < 0.5) state.shakeAmount = 0;
+  }
+
   drawBoard();
+  drawWarnings();
   drawObstacles();
-  drawGhostSnake(); // 绘制残影
+  drawGhostSnake();
   drawFood();
   drawSnake();
+  drawEffectsTimer();
+  updateAndDrawParticles();
   drawLevelBadge();
+
+  ctx.restore();
+
+  // 为粒子动画、震动和预警闪烁增加平滑渲染支持
+  if (state.particles.length > 0 || state.shakeAmount > 0 || state.warningCells.length > 0) {
+    requestAnimationFrame(draw);
+  }
 }
 
 window.addEventListener("keydown", (event) => {
