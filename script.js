@@ -695,6 +695,41 @@ function draw() {
   }
 }
 
+// 移动端手势支持
+let touchStartX = 0;
+let touchStartY = 0;
+
+canvas.addEventListener("touchstart", (e) => {
+  touchStartX = e.changedTouches[0].screenX;
+  touchStartY = e.changedTouches[0].screenY;
+}, { passive: true });
+
+canvas.addEventListener("touchend", (e) => {
+  const touchEndX = e.changedTouches[0].screenX;
+  const touchEndY = e.changedTouches[0].screenY;
+  
+  const dx = touchEndX - touchStartX;
+  const dy = touchEndY - touchStartY;
+  const threshold = 30;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(dx) > threshold) {
+      updateDirection(dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
+    }
+  } else {
+    if (Math.abs(dy) > threshold) {
+      updateDirection(dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
+    }
+  }
+}, { passive: true });
+
+// 拦截画布上的默认滚动
+canvas.addEventListener("touchmove", (e) => {
+  if (state.running && !state.paused) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
 window.addEventListener("keydown", (event) => {
   const keyMap = {
     ArrowUp: { x: 0, y: -1 },

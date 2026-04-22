@@ -27,6 +27,9 @@ body {
     radial-gradient(circle at top, rgba(255, 177, 0, 0.18), transparent 30%),
     radial-gradient(circle at bottom right, rgba(0, 168, 120, 0.2), transparent 22%),
     linear-gradient(145deg, #101820 0%, #16212f 55%, #0f161d 100%);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
 }
 
 body::before {
@@ -128,6 +131,7 @@ canvas {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
     #0b1318;
+  touch-action: none;
 }
 
 .overlay {
